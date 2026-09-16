@@ -1,0 +1,98 @@
+name: backend
+
+on:
+  pull_request:
+    paths: ['backend/**', 'contracts/**']
+  push:
+    branches: [main]
+    paths: ['backend/**', 'contracts/**']
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  build:
+    name: Build, lint, test, scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Lint (mandated rule set)
+        uses: golangci/golangci-lint-action@v7
+        with:
+          working-directory: backend
+
+      - name: sqlc generate diff (generated code in sync)
+        run: |
+          go tool sqlc generate
+          git diff --exit-code -- internal/stores/sqlcgen
+
+      - name: Generated API types diff (in sync with contract)
+        run: |
+          go tool oapi-codegen -config oapi-codegen.yaml ../contracts/openapi.yaml
+          git diff --exit-code -- internal/models/dto/api.gen.go
+
+      - name: Tests (race) with coverage
+        run: |
+          go test -race -coverprofile=coverage.out \
+            -coverpkg=./internal/... ./...
+
+      - name: Coverage gate (85% on gated packages)
+        # Constitution II: 85% on new/changed code, excluding generated
+        # code and pure wiring (main.go, boot/, sqlcgen, oapi-codegen
+        # types). Until a diff-coverage tool is wired, the gate applies
+        # to total coverage of the non-excluded packages.
+        run: |
+          grep -v -e '/internal/boot/' -e '/cmd/' -e '/internal/stores/sqlcgen/' \
+            -e '/internal/models/dto/api\.gen\.go' \
+            coverage.out > coverage.gated.out
+          total=$(go tool cover -func=coverage.gated.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
+          echo "gated coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit (t+0 >= 85 ? 0 : 1) }' \
+            || { echo "coverage ${total}% is below the 85% gate"; exit 1; }
+
+      - name: Vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  migration-smoke:
+    name: Migration up/down smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sow
+          POSTGRES_PASSWORD: sow
+          POSTGRES_DB: sow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sow"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      DSN: postgres://sow:sow@localhost:5432/sow?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: goose up, down, up
+        run: |
+          go tool goose -dir internal/migrations postgres "$DSN" up
+          go tool goose -dir internal/migrations postgres "$DSN" down
+          go tool goose -dir internal/migrations postgres "$DSN" up

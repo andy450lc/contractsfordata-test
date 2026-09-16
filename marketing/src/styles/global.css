@@ -1,0 +1,119 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/instrument-sans';
+@import '@fontsource-variable/sofia-sans-extra-condensed';
+@import '@fontsource-variable/sofia-sans';
+@import '@fontsource-variable/sofia-sans/wght-italic.css';
+
+/*
+ * Sofia Sans Extra Condensed for the headline and wordmark; Sofia Sans at
+ * normal width for section headings and buttons; Instrument Sans for
+ * everything else, two points under the reference's scale: body 16px /
+ * 1.6, subheads and accordion titles 16px medium, contents 12px with 0.4px
+ * tracking. White background, near-black ink, one blue (the favicon's)
+ * for actions and links.
+ */
+@theme {
+  --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    'Sofia Sans Extra Condensed Variable', 'Instrument Sans Variable', ui-sans-serif,
+    sans-serif;
+  --font-heading:
+    'Sofia Sans Variable', 'Instrument Sans Variable', ui-sans-serif, sans-serif;
+
+  --color-paper: #ffffff;
+  --color-card: #f8f9fb;
+  --color-ink: #14161a;
+  --color-muted: #6b7280;
+  --color-line: #e5e7eb;
+  --color-primary: #1d4ed8;
+  --color-primary-2: #1e40af;
+  --color-accent: #1d4ed8;
+
+  --text-display: 4.5rem;
+  --text-display--line-height: 1.02;
+  --text-display--font-weight: 600;
+}
+
+@layer base {
+  html {
+    @apply scroll-smooth font-sans antialiased;
+    color-scheme: light;
+  }
+  body {
+    @apply bg-paper text-ink;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.6;
+  }
+  h1 {
+    @apply font-display font-semibold;
+    text-wrap: balance;
+  }
+  h2 {
+    @apply font-heading font-semibold tracking-[-0.01em] italic;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  b,
+  strong {
+    font-weight: 600;
+  }
+  [id] {
+    scroll-margin-top: 6rem;
+  }
+}
+
+@layer components {
+  /* Hero buttons: display face, a step above body size, small radius. */
+  .btn-hero {
+    @apply inline-flex items-center justify-center rounded-md px-6 font-heading text-[1.125rem] leading-none font-semibold tracking-normal whitespace-nowrap transition-colors;
+    min-height: 3rem;
+  }
+  .btn-hero-primary {
+    @apply bg-primary text-white hover:bg-primary-2;
+  }
+  .btn-hero-secondary {
+    @apply border border-primary text-primary hover:bg-primary/5;
+  }
+  /* Small UI buttons: body face, 14px, tracked. */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-3.5 py-2 text-sm font-medium tracking-[0.4px] whitespace-nowrap transition-colors;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-2;
+  }
+  .btn-primary:disabled,
+  .btn-ghost:disabled,
+  .btn-hero:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+  .btn-ghost {
+    @apply text-ink hover:bg-ink/5;
+  }
+  .card {
+    @apply rounded-[2rem] border border-line bg-card;
+  }
+  .section-title {
+    @apply mb-3 text-[1.375rem] leading-[1.2];
+  }
+  .subhead {
+    @apply text-base leading-[1.5] font-medium;
+  }
+  .prose-list {
+    @apply space-y-3 pl-6;
+  }
+  .prose-list li {
+    @apply list-disc;
+  }
+  .link {
+    @apply font-medium text-accent underline underline-offset-4 hover:opacity-80;
+  }
+}
+
+@layer utilities {
+  .template-dialog[open] {
+    display: block;
+  }
+}

@@ -1,0 +1,218 @@
+---
+import Disclosure from '@/components/Disclosure.astro'
+import Base from '@/layouts/Base.astro'
+
+const description =
+  'A standard Statement of Work, signed online. Fill in a template, send it to the other party, and both sides sign one document that is kept with its signature record.'
+
+const toc = [
+  ['what', 'What is a SoW'],
+  ['template', 'The template'],
+  ['faq', 'FAQ'],
+] as const
+
+const steps = [
+  ['Agreement', 'number, title, effective date, standard terms.'],
+  ['Scope', 'deliverable, location, unit of acceptance, target volume.'],
+  ['Pricing & schedule', 'currency, unit fee, milestones, final deadline.'],
+  ['Environment & task mix', 'where work is collected and the mix of task difficulty.'],
+  ['Technical standards', 'the specification each unit must meet.'],
+  ['Delivery & acceptance', 'how work is handed over and accepted or rejected.'],
+  ['Developer', 'who does the work and who signs for them.'],
+  ['Review', 'everything on one page before sending.'],
+] as const
+
+const terms = [
+  [
+    'Scope',
+    'What is included in the work and what is not. The other terms depend on it.',
+  ],
+  [
+    'Deliverable',
+    'What is handed over, described so that both sides can tell when it is complete.',
+  ],
+  [
+    'Unit of acceptance',
+    'The unit the work is counted and paid in, for example an accepted usable hour. Only accepted units are invoiced.',
+  ],
+  ['Milestone', 'A date by which a set portion of the volume is due.'],
+  [
+    'Acceptance',
+    'The check a delivery must pass, who runs it, and how long they have to reject it.',
+  ],
+  ['Final deadline', 'The date the engagement ends. It can be firm or flexible.'],
+  [
+    'Standard terms',
+    'The negotiable numbers of the master agreement: notice windows, cure periods, retention, and liability caps. Pre-filled with defaults and adjustable in step one.',
+  ],
+] as const
+
+const faq = [
+  [
+    'Is a SoW legally binding?',
+    'Yes, once the parties sign. Electronic signatures are recognised in most jurisdictions. Check with a lawyer where your company is formed.',
+  ],
+  [
+    'Does the other party need an account?',
+    'No. They open the link in their email, read the document, and sign.',
+  ],
+  [
+    'Can I change a SoW after sending it?',
+    'No. Once sent, the document is fixed so that everyone signs the same thing. Send a new SoW instead.',
+  ],
+  [
+    'What is recorded for each signature?',
+    'Who signed, when, the IP address and browser used, and a hash of the exact document. The record is append-only.',
+  ],
+  [
+    'Can I use my own terms?',
+    'The structure is fixed. The variable terms, including scope, price, dates, standards, and the negotiable numbers in the master agreement, are yours to set.',
+  ],
+  [
+    'Can more than one person sign?',
+    'Yes. Each signer receives their own link to the same document.',
+  ],
+  [
+    'Where is the signed copy kept?',
+    'With the agreement, next to its signature record. You can download the PDF at any time.',
+  ],
+] as const
+
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      name: 'SoW',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      description,
+      url: Astro.site?.href,
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: faq.map(([q, a]) => ({
+        '@type': 'Question',
+        name: q,
+        acceptedAnswer: { '@type': 'Answer', text: a },
+      })),
+    },
+  ],
+}
+---
+
+<Base title="SoW" description={description}>
+  <section
+    class="mx-auto max-w-[800px] px-6 pt-24 pb-20 text-center max-sm:pt-14 max-sm:pb-14"
+  >
+    <h1 class="text-[3.25rem] leading-[1.02] sm:text-[4.25rem] lg:text-display">
+      A standard Statement of Work, signed online
+    </h1>
+    <p class="mx-auto mt-6 max-w-[640px] text-lg leading-[1.7]">
+      Fill in a template, send it to the other party, and both sides sign one document.
+      The signed copy and its signature record are kept together.
+    </p>
+    <div class="mt-10 flex justify-center">
+      <button type="button" data-open-template class="btn-hero btn-hero-primary"
+        >Download template</button
+      >
+    </div>
+  </section>
+
+  <div
+    class="mx-auto grid max-w-[1104px] gap-12 px-6 pb-24 lg:grid-cols-[160px_640px] lg:gap-12"
+  >
+    <nav class="hidden lg:block" aria-label="On this page">
+      <ul class="sticky top-24 space-y-2.5 text-xs leading-[1.625] tracking-[0.4px]">
+        {
+          toc.map(([id, label]) => (
+            <li>
+              <a href={`#${id}`} class="hover:text-accent">
+                {label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="space-y-16">
+      <section id="what">
+        <h2 class="section-title">What is a SoW</h2>
+        <p class="mb-6">
+          A Statement of Work is the contract that sets out what will be delivered, by
+          when, to what standard, and for how much. When a question comes up during the
+          work, it is the document both sides refer to.
+        </p>
+        <ul class="prose-list">
+          <li>
+            <b>Standard:</b> the same structure every time, so both sides know where each term
+            lives.
+          </li>
+          <li>
+            <b>Simple:</b> standard terms are pre-filled. You set the terms that vary.
+          </li>
+          <li>
+            <b>Clear:</b> scope, deliverables, dates, and fees in one place, in plain language.
+          </li>
+          <li>
+            <b>Recorded:</b> each signature is kept with who signed, when, and exactly what
+            was signed.
+          </li>
+        </ul>
+      </section>
+
+      <section id="template">
+        <h2 class="section-title">The template</h2>
+        <p class="subhead mb-2">Eight steps</p>
+        <p class="mb-6">
+          Standard terms come pre-filled. You complete the parts that change from one
+          engagement to the next.
+        </p>
+        <ol class="space-y-3 pl-6">
+          {
+            steps.map(([name, what]) => (
+              <li class="list-decimal">
+                <b>{name}:</b> {what}
+              </li>
+            ))
+          }
+        </ol>
+        <p class="mt-8">
+          <button type="button" data-open-template class="link text-left"
+            >Get the editable Statement of Work template</button
+          >
+        </p>
+      </section>
+
+      <section id="terms">
+        <p class="subhead">Terms, defined</p>
+        <p class="mb-4">The handful worth knowing before you send one.</p>
+        <div class="border-t border-ink/10">
+          {
+            terms.map(([term, definition]) => (
+              <Disclosure summary={term}>{definition}</Disclosure>
+            ))
+          }
+        </div>
+      </section>
+
+      <section id="faq">
+        <h2 class="mb-6 text-[2.375rem] leading-[1.1]">Frequently asked questions</h2>
+        <div class="border-t border-ink/10">
+          {faq.map(([q, a]) => <Disclosure summary={q}>{a}</Disclosure>)}
+        </div>
+        <p class="mt-12 text-[13px] leading-5 text-muted">
+          SoW is not a law firm and does not give legal advice. Consult a lawyer licensed
+          where your company is formed before relying on any agreement.
+        </p>
+      </section>
+    </div>
+  </div>
+
+  <script
+    is:inline
+    type="application/ld+json"
+    set:html={JSON.stringify(structuredData)}
+  />
+</Base>

@@ -1,0 +1,44 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "marketing",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "ASTRO_DEV_BACKGROUND=1",
+        "/opt/homebrew/opt/node@22/bin/npm",
+        "run",
+        "dev",
+        "--prefix",
+        "marketing",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "4321"
+      ],
+      "port": 4321
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "/opt/homebrew/opt/node@22/bin/npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "web"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "make",
+      "runtimeArgs": [
+        "-C",
+        "backend",
+        "run"
+      ],
+      "port": 8080
+    }
+  ]
+}

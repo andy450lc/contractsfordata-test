@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Secrets and local env
+.env
+.env.local
+.env.*.local
+
+# Build and dependency output
+node_modules/
+dist/
+coverage/
+tmp/
+*.out
+.wrangler/
+
+# Executed source agreement (private, not committed)
+specs/003-render-agreement-pdf/source/
+
+# Generated output artifacts
+output/

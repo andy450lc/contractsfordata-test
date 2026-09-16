@@ -1,0 +1,52 @@
+---
+import {
+  PUBLIC_CONFIGURATOR_EMAIL_ENABLED,
+  PUBLIC_TEMPLATE_DELIVERY_URL,
+} from 'astro:env/client'
+import { TemplateDeliveryDialog } from './TemplateDeliveryDialog'
+
+const endpoint = PUBLIC_TEMPLATE_DELIVERY_URL.replace(/\/$/, '')
+---
+
+<div
+  id="template-delivery-root"
+  data-endpoint={endpoint}
+  data-email-delivery-enabled={String(PUBLIC_CONFIGURATOR_EMAIL_ENABLED)}
+>
+  <TemplateDeliveryDialog
+    endpoint={endpoint}
+    emailDeliveryEnabled={PUBLIC_CONFIGURATOR_EMAIL_ENABLED}
+  />
+</div>
+
+<script>
+  // This island is deliberately mounted from an external module so the
+  // site's `script-src 'self'` CSP stays strict. When Vite's development
+  // React transform is active, install its refresh preamble before importing
+  // the component; production builds tree-shake this branch.
+  if (import.meta.env.DEV) {
+    const RefreshRuntime = (await import('react-refresh/runtime')).default
+    RefreshRuntime.injectIntoGlobalHook(window)
+    Object.assign(window, {
+      $RefreshReg$: () => undefined,
+      $RefreshSig$: () => (type: unknown) => type,
+    })
+  }
+
+  const [{ createElement }, { hydrateRoot }, { TemplateDeliveryDialog }] =
+    await Promise.all([
+      import('react'),
+      import('react-dom/client'),
+      import('./TemplateDeliveryDialog'),
+    ])
+
+  const root = document.getElementById('template-delivery-root')
+  const endpoint = root?.dataset.endpoint
+  if (root && endpoint) {
+    const emailDeliveryEnabled = root.dataset.emailDeliveryEnabled === 'true'
+    hydrateRoot(
+      root,
+      createElement(TemplateDeliveryDialog, { endpoint, emailDeliveryEnabled }),
+    )
+  }
+</script>

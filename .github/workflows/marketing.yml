@@ -1,0 +1,41 @@
+name: marketing
+
+on:
+  pull_request:
+    paths: ['marketing/**']
+  push:
+    branches: [main]
+    paths: ['marketing/**']
+
+defaults:
+  run:
+    working-directory: marketing
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: marketing/.nvmrc
+          cache: npm
+          cache-dependency-path: marketing/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck (astro check)
+        run: npm run check
+      - name: Format check
+        run: npm run format:check
+      - name: Tests
+        run: npm run test
+      - name: Build
+        # Public URLs are stamped into the output and delivery CSP.
+        # CI only validates the build, so any absolute URL will do.
+        env:
+          PUBLIC_SITE_URL: http://localhost:4321
+          PUBLIC_APP_ORIGIN: http://localhost:5173
+          PUBLIC_TEMPLATE_DELIVERY_URL: http://localhost:8080/v1/template-deliveries
+        run: npm run build
+      - name: Validate the Workers static-assets config
+        run: npx wrangler deploy --dry-run

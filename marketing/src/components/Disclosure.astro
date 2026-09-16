@@ -1,0 +1,30 @@
+---
+/**
+ * A question or term that opens on click. Native <details>, so it works
+ * with no JavaScript.
+ */
+interface Props {
+  summary: string
+}
+const { summary } = Astro.props
+---
+
+<details class="group border-b border-ink/10 py-4">
+  <summary
+    class="flex cursor-pointer list-none items-center justify-between gap-4 text-base leading-[1.5] font-medium [&::-webkit-details-marker]:hidden"
+  >
+    {summary}
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      class="shrink-0 transition-transform group-open:rotate-45"
+      ><path d="M7 1v12M1 7h12"></path></svg
+    >
+  </summary>
+  <div class="pt-3 text-ink/80"><slot /></div>
+</details>

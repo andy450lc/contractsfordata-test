@@ -1,0 +1,68 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - errcheck
+    - govet
+    - gocyclo
+    - wrapcheck
+    - depguard
+    - forbidigo
+    - ineffassign
+  settings:
+    gocyclo:
+      # Complexity per function must be at most 10.
+      min-complexity: 11
+    depguard:
+      rules:
+        # All logging goes through internal/logging with ctx.
+        no-bare-logging:
+          files:
+            - "!**/internal/logging/**"
+            - "!**/cmd/app/**"
+            - "!**/internal/boot/**"
+            # middleware constructors receive *slog.Logger via DI (type
+            # reference only). Actual logging still goes through
+            # internal/logging.
+            - "!**/internal/middleware/**"
+            - "!$test"
+          deny:
+            - pkg: log/slog
+              desc: use internal/logging (ctx-aware) instead of bare slog
+            - pkg: "log$"
+              desc: stdlib log is banned; use internal/logging
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print(|f|ln)$
+          msg: use internal/logging, not stdout printing
+        - pattern: ^http\.(Get|Post|PostForm|Head)$
+          msg: bare http calls break trace propagation; use the fx client factory
+        - pattern: ^http\.DefaultClient$
+          msg: bare http.Client breaks trace propagation; use the fx client factory
+    wrapcheck:
+      ignore-package-globs:
+        # cockroachdb/errors wrappers are themselves the approved wrap mechanism.
+        - github.com/cockroachdb/errors*
+        # Errors from echo response writers/HTTPError return straight back
+        # into echo's own error handling. Wrapping them adds nothing.
+        - github.com/labstack/echo*
+  exclusions:
+    generated: lax
+    paths:
+      - internal/stores/sqlcgen
+    rules:
+      # Tests assert. They don't need wrap-chain, logging, Close-error,
+      # or complexity discipline.
+      - path: _test\.go
+        linters:
+          - wrapcheck
+          - forbidigo
+          - depguard
+          - errcheck
+          - gocyclo
+      # Central error handler and boot wiring log via slog handler setup.
+      - path: internal/logging/
+        linters:
+          - depguard

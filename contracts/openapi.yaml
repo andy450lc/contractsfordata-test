@@ -1,0 +1,1315 @@
+openapi: 3.1.0
+info:
+  title: SoW API
+  description: >-
+    Business API for SoW. All operations live under the /v1 prefix.
+    Operational probes (/livez, /readyz) and /metrics are infrastructure
+    endpoints outside this contract — see
+    specs/001-auth-landing-dashboard/contracts/health-and-ops.md.
+    Timestamps are Unix milliseconds (int64) everywhere. Session endpoints
+    under /auth are documented in
+    specs/001-auth-landing-dashboard/contracts/session-cookie.md and
+    specs/004-first-party-auth-forms/contracts/.
+  version: 0.3.0
+servers:
+  - url: /v1
+    description: Versioned API root
+paths:
+  /auth/login:
+    get:
+      operationId: startLogin
+      summary: Start a social sign-in
+      description: >-
+        Builds the identity provider's authorization URL for the named
+        social provider with a signed state carrying the validated return
+        path, and redirects the browser to it. The browser lands on the
+        provider's own consent screen with no intermediate page. A browser
+        navigation, not an API call.
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [google]
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Same-app absolute path to land on after sign-in. Invalid values
+            fall back to /dashboard.
+      responses:
+        '302':
+          description: Redirect to the social provider.
+          headers:
+            Location:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/sign-in:
+    post:
+      operationId: signIn
+      summary: Sign in with email and password
+      description: >-
+        Exchanges the credentials with the identity provider server-side.
+        On success seals the session cookie and returns an access token.
+        When the email is not yet verified, answers 202 with a pending
+        token and the provider emails a six-digit code. A wrong password
+        and an unknown email answer the same 401.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionStarted'
+        '202':
+          $ref: '#/components/responses/VerificationPending'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/sign-up:
+    post:
+      operationId: signUp
+      summary: Create an account with email and password
+      description: >-
+        Creates the user at the identity provider and starts email
+        verification. Answers 202 with a pending token when the input is
+        valid, whether or not the address already has an account, so
+        nothing reveals which addresses are registered. An address that
+        already has an account receives an email saying so instead of a
+        code. When the provider does not require verification, answers
+        200 with a session instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignUpRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionStarted'
+        '202':
+          $ref: '#/components/responses/VerificationPending'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '422':
+          $ref: '#/components/responses/WeakPassword'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/verify-email:
+    post:
+      operationId: verifyEmail
+      summary: Complete sign-in or sign-up with the emailed code
+      description: >-
+        Exchanges the pending token and the six-digit code with the
+        identity provider. On success seals the session cookie and returns
+        an access token. A wrong, expired, or unknown code answers 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionStarted'
+        '400':
+          description: Malformed input (validation_failed) or a rejected code (invalid_code).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/resend-verification:
+    post:
+      operationId: resendVerification
+      summary: Email a new verification code
+      description: >-
+        Asks the identity provider to send a fresh code to the address.
+        The previous code stops working. Always answers 202 for a
+        well-formed address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailRequest'
+      responses:
+        '202':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      summary: Email a password reset link
+      description: >-
+        Issues a single-use, expiring reset token at the identity provider
+        and emails a link to the web app's reset page. Always answers 202
+        for a well-formed address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailRequest'
+      responses:
+        '202':
+          description: Accepted.
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      summary: Set a new password from a reset link
+      description: >-
+        Confirms the reset token with the identity provider, sets the new
+        password, signs the user in, seals the session cookie, and returns
+        an access token. An expired or used token answers 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionStarted'
+        '400':
+          description: Malformed input (validation_failed) or a rejected token (invalid_reset_token).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '422':
+          $ref: '#/components/responses/WeakPassword'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/callback:
+    get:
+      operationId: completeLogin
+      summary: Complete hosted sign-in
+      description: >-
+        Return leg of the hosted flow. Verifies the state, exchanges the
+        authorization code with the identity provider server-side,
+        provisions the user record, seals the refresh token into the
+        session cookie, and redirects to the web app. Every failure
+        redirects to the web app's sign-in page with an error code and no
+        session.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: >-
+            Redirect to WEB_APP_URL/callback?returnTo=… on success, or to
+            WEB_APP_URL/?error=… on failure.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+              description: The sealed session cookie, or a clearing cookie on failure.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      summary: Exchange the session cookie for an access token
+      description: >-
+        Opens the session cookie, obtains a fresh access token from the
+        identity provider, rotates the refresh token, re-seals the cookie,
+        and returns the access token. Requires a same-site Origin. A
+        rejected or missing cookie clears it and answers 401.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: A fresh access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/logout:
+    post:
+      operationId: endSession
+      summary: End the session
+      description: >-
+        Revokes the identity provider session named in the cookie and
+        clears the cookie. Requires a same-site Origin. Answers 204 even
+        when there was no cookie, so sign-out is idempotent.
+      security:
+        - sessionCookie: []
+        - {}
+      responses:
+        '204':
+          description: Session ended and cookie cleared.
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /me:
+    get:
+      operationId: getMe
+      summary: Get the authenticated user
+      description: >-
+        Returns the platform user record for the caller identified by the
+        bearer access token. If the record is missing, the server fetches
+        it from the identity provider and provisions it before responding.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The authenticated user's record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /template-deliveries/download:
+    post:
+      operationId: downloadTemplateDocument
+      summary: Generate and download an acknowledged Word template
+      description: >-
+        Generates one genuine OOXML Word document from the validated contract
+        configuration. configuration may be omitted only for the public blank
+        template. The acknowledgment is request-scoped and must be explicitly true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDownloadRequest'
+      responses:
+        '200':
+          description: The generated Microsoft Word document.
+          headers:
+            Content-Disposition:
+              required: true
+              schema:
+                type: string
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/GenerationFailed'
+  /template-deliveries/email:
+    post:
+      operationId: emailTemplateDocument
+      summary: Generate and email an acknowledged Word template
+      description: >-
+        Generates the same OOXML document used by direct download and attaches
+        those bytes to an email. Success means that the configured provider has
+        accepted the message; an unconfigured development logger never counts as
+        delivery. configuration may be omitted only for the public blank template.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            Opaque request key used to prevent an accidental duplicate send. Do
+            not include an email address or contract value in this key.
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailDocumentRequest'
+      responses:
+        '202':
+          description: The email provider accepted the message and attachment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailDeliveryAccepted'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '409':
+          description: The idempotency key was already used for different input.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/GenerationFailed'
+        '503':
+          $ref: '#/components/responses/EmailDeliveryUnavailable'
+  /public/sow-configurator/download:
+    post:
+      operationId: downloadPublicSOWDocument
+      summary: Generate a public configured Word agreement
+      description: >-
+        Validates the four public configurator answers and optional client
+        information, then returns a genuine OOXML Word document. This operation
+        is unauthenticated and separate from the authenticated agreement
+        configurator. The request-scoped acknowledgment must be explicitly true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicSOWDownloadRequest'
+      responses:
+        '200':
+          description: The configured Microsoft Word agreement.
+          headers:
+            Content-Disposition:
+              required: true
+              schema:
+                type: string
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/GenerationFailed'
+  /public/sow-configurator/email:
+    post:
+      operationId: emailPublicSOWDocument
+      summary: Email a public configured Word agreement
+      description: >-
+        Generates the same configured OOXML document as the public download and
+        attaches it to an email. The frontend exposes this operation only after
+        a real provider-backed end-to-end send has been verified.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Opaque key for suppressing an accidental duplicate send.
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicSOWEmailRequest'
+      responses:
+        '202':
+          description: The configured provider accepted the email and attachment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailDeliveryAccepted'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '409':
+          description: The idempotency key was already used for different input.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/GenerationFailed'
+        '503':
+          $ref: '#/components/responses/EmailDeliveryUnavailable'
+  /webhooks/workos:
+    post:
+      operationId: receiveWorkOSWebhook
+      summary: Receive a WorkOS event
+      description: >-
+        Inbound endpoint for WorkOS webhooks (user.created, user.updated,
+        user.deleted). Authenticated by the WorkOS-Signature header, never
+        by bearer tokens or cookies. Processing is idempotent and
+        order-safe. Unrecognized event types are acknowledged and ignored.
+        See specs/001-auth-landing-dashboard/contracts/workos-webhook.md.
+      parameters:
+        - name: WorkOS-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: 't=<unix-ms>, v1=<hex HMAC-SHA256 of "t.body">'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkOSEvent'
+      responses:
+        '200':
+          description: Event verified and processed (or acknowledged as ignored).
+        '400':
+          description: Body is not a parseable WorkOS event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: WorkOS AuthKit access token, validated against the WorkOS JWKS.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sow_session
+      description: >-
+        Encrypted HttpOnly session cookie set by /auth/callback. Read only
+        by /auth/refresh and /auth/logout.
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired, or otherwise invalid credential.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ForbiddenOrigin:
+      description: The Origin header is missing or not an allowed web origin.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ProviderUnavailable:
+      description: The identity provider could not be reached.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SessionStarted:
+      description: Signed in. The session cookie is set alongside.
+      headers:
+        Set-Cookie:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AccessToken'
+    VerificationPending:
+      description: The email must be verified before a session starts.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PendingVerification'
+    ValidationFailed:
+      description: Malformed input. details lists field errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InvalidCredentials:
+      description: The email and password do not match an account.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    WeakPassword:
+      description: The identity provider rejected the password. details.message says why.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    GenerationFailed:
+      description: The Word document could not be generated.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    EmailDeliveryUnavailable:
+      description: Email delivery is unconfigured or the provider rejected the message.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    AccessToken:
+      type: object
+      required: [access_token, expires_at]
+      properties:
+        access_token:
+          type: string
+          description: Short-lived bearer token for /v1 calls. Hold in memory only.
+        expires_at:
+          type: integer
+          format: int64
+          description: Token expiry, Unix milliseconds.
+    User:
+      type: object
+      required: [id, email, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Identity-provider user id (opaque text).
+          examples: [user_01K2Z9QH8T5XW4V3J6M0R7ANBQ]
+        email:
+          type: string
+          format: email
+          description: The address the identity provider holds for the user.
+        name:
+          type: string
+          description: Display name. May be empty when the provider has none.
+        created_at:
+          type: integer
+          format: int64
+          description: Creation time, Unix milliseconds.
+        updated_at:
+          type: integer
+          format: int64
+          description: Last provider update time, Unix milliseconds.
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+    SignUpRequest:
+      type: object
+      required: [first_name, last_name, email, password]
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        last_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+    PendingVerification:
+      type: object
+      required: [pending_token]
+      properties:
+        pending_token:
+          type: string
+          maxLength: 512
+          description: Opaque, single-use, short-lived. Send back with the code.
+    VerifyEmailRequest:
+      type: object
+      required: [pending_token, code]
+      properties:
+        pending_token:
+          type: string
+          maxLength: 512
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+    EmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          maxLength: 512
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+    DocumentDownloadRequest:
+      type: object
+      additionalProperties: false
+      required: [acknowledged]
+      properties:
+        acknowledged:
+          type: boolean
+          enum: [true]
+          description: Explicit, request-scoped legal acknowledgment.
+        configuration:
+          $ref: '#/components/schemas/ContractConfiguration'
+    EmailDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [acknowledged, email]
+      properties:
+        acknowledged:
+          type: boolean
+          enum: [true]
+          description: Explicit, request-scoped legal acknowledgment.
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        configuration:
+          $ref: '#/components/schemas/ContractConfiguration'
+    EmailDeliveryAccepted:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
+          enum: [true]
+    PublicSOWDownloadRequest:
+      type: object
+      additionalProperties: false
+      required: [acknowledged, answers, client_information]
+      properties:
+        acknowledged:
+          type: boolean
+          enum: [true]
+          description: Explicit, request-scoped legal acknowledgment.
+        client_information:
+          $ref: '#/components/schemas/PublicSOWClientInformation'
+        answers:
+          $ref: '#/components/schemas/PublicSOWAnswers'
+    PublicSOWEmailRequest:
+      type: object
+      additionalProperties: false
+      required: [acknowledged, email, answers, client_information]
+      properties:
+        acknowledged:
+          type: boolean
+          enum: [true]
+          description: Explicit, request-scoped legal acknowledgment.
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        client_information:
+          $ref: '#/components/schemas/PublicSOWClientInformation'
+        answers:
+          $ref: '#/components/schemas/PublicSOWAnswers'
+    PublicSOWClientInformation:
+      type: object
+      additionalProperties: false
+      required: [party_type, company_name]
+      properties:
+        delivery_preference:
+          type: string
+          enum: [download, email]
+        party_type:
+          type: string
+          enum: [supplier, buyer, other]
+        company_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+    PublicSOWAnswers:
+      type: object
+      additionalProperties: false
+      required:
+        - subcontracting
+        - jurisdiction_rules
+        - data_ip_liability_cap
+        - exclusivity
+      properties:
+        subcontracting:
+          type: string
+          enum:
+            - never_allowed
+            - buyer_written_consent
+            - notice_with_buyer_objection
+        jurisdiction_rules:
+          type: string
+          enum:
+            - agreement_country_terms
+            - sow_country_appendix
+            - separate_country_rider
+        data_ip_liability_cap:
+          type: string
+          enum:
+            - greater_of_amount_or_fee_multiple
+            - fee_multiple_only
+            - no_special_cap
+        data_ip_liability_floor_amount:
+          $ref: '#/components/schemas/ContractMoney'
+        data_ip_liability_multiplier:
+          $ref: '#/components/schemas/ContractNumber'
+        exclusivity:
+          type: string
+          enum:
+            - fully_exclusive_global
+            - exclusive_limited_field
+            - non_exclusive
+        exclusivity_field_scope:
+          type: string
+          maxLength: 160
+    ContractConfiguration:
+      type: object
+      additionalProperties: false
+      required: [template_version, organization, steps]
+      properties:
+        template_version:
+          type: string
+          enum: [content-development-1]
+        organization:
+          $ref: '#/components/schemas/ContractOrganization'
+        steps:
+          $ref: '#/components/schemas/ContractSteps'
+    ContractOrganization:
+      type: object
+      additionalProperties: false
+      required:
+        - legal_name
+        - entity_type
+        - incorporation_place
+        - governing_law
+        - address
+        - short_name
+        - signer_name
+        - signer_title
+        - signer_email
+        - contact_phone
+      properties:
+        legal_name:
+          $ref: '#/components/schemas/RequiredContractText'
+        entity_type:
+          $ref: '#/components/schemas/RequiredContractText'
+        incorporation_place:
+          $ref: '#/components/schemas/RequiredContractText'
+        governing_law:
+          $ref: '#/components/schemas/RequiredContractText'
+        address:
+          $ref: '#/components/schemas/RequiredContractText'
+        short_name:
+          $ref: '#/components/schemas/RequiredContractText'
+        signer_name:
+          $ref: '#/components/schemas/RequiredContractText'
+        signer_title:
+          $ref: '#/components/schemas/RequiredContractText'
+        signer_email:
+          type: string
+          format: email
+          maxLength: 254
+        contact_phone:
+          $ref: '#/components/schemas/OptionalContractText'
+    ContractSteps:
+      type: object
+      additionalProperties: false
+      required: [agreement, scope, pricing, environment, technical, delivery, counterparty]
+      properties:
+        agreement:
+          $ref: '#/components/schemas/AgreementTerms'
+        scope:
+          $ref: '#/components/schemas/ContractScope'
+        pricing:
+          $ref: '#/components/schemas/ContractPricing'
+        environment:
+          $ref: '#/components/schemas/ContractEnvironment'
+        technical:
+          $ref: '#/components/schemas/ContractTechnical'
+        delivery:
+          $ref: '#/components/schemas/ContractDelivery'
+        counterparty:
+          $ref: '#/components/schemas/ContractCounterparty'
+    AgreementTerms:
+      type: object
+      additionalProperties: false
+      required:
+        - sow_number
+        - title
+        - effective_date
+        - exclusive
+        - materials_summary
+        - incident_notice_hours
+        - cure_days
+        - convenience_notice_days
+        - records_retention_years
+        - liability_lookback_months
+        - excluded_claims_cap_multiplier
+        - data_claims_cap_floor
+      properties:
+        sow_number:
+          type: integer
+          minimum: 1
+          maximum: 999999
+        title:
+          $ref: '#/components/schemas/RequiredContractText'
+        effective_date:
+          type: string
+          format: date
+        exclusive:
+          type: boolean
+        materials_summary:
+          $ref: '#/components/schemas/RequiredContractText'
+        incident_notice_hours:
+          $ref: '#/components/schemas/WholeContractNumber'
+        cure_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+        convenience_notice_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+        records_retention_years:
+          $ref: '#/components/schemas/WholeContractNumber'
+        liability_lookback_months:
+          $ref: '#/components/schemas/WholeContractNumber'
+        excluded_claims_cap_multiplier:
+          $ref: '#/components/schemas/ContractNumber'
+        data_claims_cap_floor:
+          $ref: '#/components/schemas/ContractMoney'
+    ContractScope:
+      type: object
+      additionalProperties: false
+      required:
+        - deliverable_description
+        - regions
+        - venue_constraint
+        - target_volume
+        - unit
+        - deliverables
+        - notes
+      properties:
+        deliverable_description:
+          $ref: '#/components/schemas/RequiredContractText'
+        regions:
+          type: array
+          minItems: 1
+          maxItems: 250
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[A-Z]{2}$'
+        venue_constraint:
+          $ref: '#/components/schemas/RequiredContractText'
+        target_volume:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 10000000000000
+        unit:
+          $ref: '#/components/schemas/RequiredContractText'
+        deliverables:
+          $ref: '#/components/schemas/ContractTextRows'
+        ambient_audio:
+          type: boolean
+          default: false
+          description: Whether ambient audio is permitted for this SOW.
+        notes:
+          $ref: '#/components/schemas/OptionalContractText'
+    ContractPricing:
+      type: object
+      additionalProperties: false
+      required:
+        - currency
+        - unit_fee
+        - deposit_required
+        - deposit_amount
+        - invoicing_cadence
+        - payment_terms_days
+        - payment_methods
+        - invoice_email
+        - milestones
+        - firm_deadline
+      properties:
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        unit_fee:
+          $ref: '#/components/schemas/ContractMoney'
+        deposit_required:
+          type: boolean
+        deposit_amount:
+          oneOf:
+            - $ref: '#/components/schemas/ContractMoney'
+            - type: 'null'
+        invoicing_cadence:
+          $ref: '#/components/schemas/RequiredContractText'
+        payment_terms_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+        payment_methods:
+          $ref: '#/components/schemas/RequiredContractText'
+        invoice_email:
+          type: string
+          format: email
+          maxLength: 254
+        milestones:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ContractMilestone'
+        firm_deadline:
+          type: boolean
+    ContractMilestone:
+      type: object
+      additionalProperties: false
+      required: [name, volume, deadline, notes, is_final]
+      properties:
+        name:
+          $ref: '#/components/schemas/RequiredContractText'
+        volume:
+          $ref: '#/components/schemas/RequiredContractText'
+        deadline:
+          type: string
+          format: date
+        notes:
+          $ref: '#/components/schemas/OptionalContractText'
+        is_final:
+          type: boolean
+    ContractEnvironment:
+      type: object
+      additionalProperties: false
+      required:
+        - verticals
+        - limits
+        - difficulty
+        - difficulty_caps
+        - plan_required
+        - change_window_hours
+        - extra_prohibited
+        - extra_excluded_settings
+      properties:
+        verticals:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ContractVertical'
+        limits:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ContractLimit'
+        difficulty:
+          $ref: '#/components/schemas/ContractDifficulty'
+        difficulty_caps:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ContractDifficultyCap'
+        plan_required:
+          type: boolean
+        change_window_hours:
+          $ref: '#/components/schemas/WholeContractNumber'
+        extra_prohibited:
+          $ref: '#/components/schemas/OptionalContractTextRows'
+        extra_excluded_settings:
+          $ref: '#/components/schemas/OptionalContractTextRows'
+    ContractVertical:
+      type: object
+      additionalProperties: false
+      required: [verticals, target, details]
+      properties:
+        verticals:
+          $ref: '#/components/schemas/RequiredContractText'
+        target:
+          $ref: '#/components/schemas/RequiredContractText'
+        details:
+          $ref: '#/components/schemas/RequiredContractText'
+    ContractLimit:
+      type: object
+      additionalProperties: false
+      required: [limit, value, unit]
+      properties:
+        limit:
+          $ref: '#/components/schemas/RequiredContractText'
+        value:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+          maxLength: 64
+        unit:
+          $ref: '#/components/schemas/OptionalContractText'
+    ContractDifficulty:
+      type: object
+      additionalProperties: false
+      required: [easy, medium, hard]
+      properties:
+        easy:
+          $ref: '#/components/schemas/Percent'
+        medium:
+          $ref: '#/components/schemas/Percent'
+        hard:
+          $ref: '#/components/schemas/Percent'
+    ContractDifficultyCap:
+      type: object
+      additionalProperties: false
+      required: [scope, easy, medium, hard]
+      properties:
+        scope:
+          $ref: '#/components/schemas/RequiredContractText'
+        easy:
+          $ref: '#/components/schemas/DecimalText'
+        medium:
+          $ref: '#/components/schemas/DecimalText'
+        hard:
+          $ref: '#/components/schemas/DecimalText'
+    ContractTechnical:
+      type: object
+      additionalProperties: false
+      required: [requirements, pre_collection_materials, condition_of_payment]
+      properties:
+        requirements:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ContractRequirement'
+        pre_collection_materials:
+          $ref: '#/components/schemas/OptionalContractTextRows'
+        condition_of_payment:
+          type: boolean
+    ContractRequirement:
+      type: object
+      additionalProperties: false
+      required: [requirement, specification, rejection]
+      properties:
+        requirement:
+          $ref: '#/components/schemas/RequiredContractText'
+        specification:
+          $ref: '#/components/schemas/RequiredContractText'
+        rejection:
+          $ref: '#/components/schemas/RequiredContractText'
+    ContractDelivery:
+      type: object
+      additionalProperties: false
+      required:
+        - storage_location
+        - delivery_cadence
+        - manifest_format
+        - manifest_fields
+        - site_data_fields
+        - integrity_text
+        - review_window_days
+        - correction_days
+        - deemed_acceptance
+        - rejected_stays_developer_owned
+        - deletion_window_days
+      properties:
+        storage_location:
+          $ref: '#/components/schemas/RequiredContractText'
+        delivery_cadence:
+          $ref: '#/components/schemas/RequiredContractText'
+        manifest_format:
+          $ref: '#/components/schemas/RequiredContractText'
+        manifest_fields:
+          $ref: '#/components/schemas/ContractTextRows'
+        site_data_fields:
+          $ref: '#/components/schemas/OptionalContractTextRows'
+        integrity_text:
+          $ref: '#/components/schemas/RequiredContractText'
+        review_window_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+        correction_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+        deemed_acceptance:
+          type: boolean
+        rejected_stays_developer_owned:
+          type: boolean
+        deletion_window_days:
+          $ref: '#/components/schemas/WholeContractNumber'
+    ContractCounterparty:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+        - email
+        - legal_name
+        - entity_jurisdiction
+        - address
+        - short_name
+        - signatory_name
+        - signatory_title
+        - cc_emails
+      properties:
+        mode:
+          type: string
+          enum: [details, invite]
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        legal_name:
+          $ref: '#/components/schemas/OptionalContractText'
+        entity_jurisdiction:
+          $ref: '#/components/schemas/OptionalContractText'
+        address:
+          $ref: '#/components/schemas/OptionalContractText'
+        short_name:
+          $ref: '#/components/schemas/OptionalContractText'
+        signatory_name:
+          $ref: '#/components/schemas/OptionalContractText'
+        signatory_title:
+          $ref: '#/components/schemas/OptionalContractText'
+        cc_emails:
+          $ref: '#/components/schemas/OptionalContractText'
+    ContractTextRow:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          $ref: '#/components/schemas/RequiredContractText'
+    ContractTextRows:
+      type: array
+      minItems: 1
+      maxItems: 250
+      items:
+        $ref: '#/components/schemas/ContractTextRow'
+    OptionalContractTextRows:
+      type: array
+      maxItems: 250
+      items:
+        $ref: '#/components/schemas/ContractTextRow'
+    RequiredContractText:
+      type: string
+      minLength: 1
+      maxLength: 10000
+    OptionalContractText:
+      type: string
+      maxLength: 10000
+    DecimalText:
+      type: string
+      pattern: '^\d+(\.\d+)?$'
+      maxLength: 64
+    ContractNumber:
+      type: number
+      minimum: 0
+      maximum: 10000000000000
+    WholeContractNumber:
+      type: integer
+      minimum: 0
+      maximum: 10000000000000
+    ContractMoney:
+      type: number
+      minimum: 0
+      exclusiveMaximum: 10000000000000
+    Percent:
+      type: number
+      minimum: 0
+      maximum: 100
+    WorkOSEvent:
+      type: object
+      required: [id, event, data, created_at]
+      description: >-
+        WorkOS event envelope. data carries the provider's user object for
+        user.* events; its shape is owned by WorkOS and validated
+        structurally, not exhaustively.
+      properties:
+        id:
+          type: string
+          description: Event id, used for idempotent processing.
+        event:
+          type: string
+          description: Event type, e.g. user.created.
+        data:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          description: ISO 8601 event creation time (provider-owned format).
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Machine-readable snake_case error code.
+        request_id:
+          type: string
+          description: Correlation id to quote in a support request.
+        details:
+          description: Optional structured detail (validation errors and similar).

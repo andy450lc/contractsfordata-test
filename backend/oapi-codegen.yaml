@@ -1,0 +1,10 @@
+# Generates Go types from contracts/openapi.yaml into the dto package.
+# Regenerate with make oapi-generate.
+package: dto
+output: internal/models/dto/api.gen.go
+generate:
+  models: true
+output-options:
+  skip-prune: true
+compatibility:
+  always-prefix-enum-values: true

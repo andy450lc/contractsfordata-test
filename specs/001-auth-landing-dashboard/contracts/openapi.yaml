@@ -1,0 +1,292 @@
+# Target content for contracts/openapi.yaml (repo root) — feature 001.
+# The implementation phase creates the root contract from this document.
+openapi: 3.1.0
+info:
+  title: SoW API
+  description: >-
+    Business API for SoW. All operations live under the /v1 prefix.
+    Operational probes (/livez, /readyz) and /metrics are infrastructure
+    endpoints outside this contract — see
+    specs/001-auth-landing-dashboard/contracts/health-and-ops.md.
+    Timestamps are Unix milliseconds (int64) everywhere. Session endpoints
+    under /auth are documented in
+    specs/001-auth-landing-dashboard/contracts/session-cookie.md.
+  version: 0.1.0
+servers:
+  - url: /v1
+    description: Versioned API root
+paths:
+  /auth/login:
+    get:
+      operationId: startLogin
+      summary: Start hosted sign-in or sign-up
+      description: >-
+        Builds the identity provider's hosted authorization URL with a
+        signed state carrying the validated return path, and redirects the
+        browser to it. A browser navigation, not an API call.
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Same-app absolute path to land on after sign-in. Invalid values
+            fall back to /dashboard.
+        - name: screen
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [sign-in, sign-up]
+            default: sign-in
+          description: Which hosted screen to open first.
+      responses:
+        '302':
+          description: Redirect to the hosted authentication page.
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/callback:
+    get:
+      operationId: completeLogin
+      summary: Complete hosted sign-in
+      description: >-
+        Return leg of the hosted flow. Verifies the state, exchanges the
+        authorization code with the identity provider server-side,
+        provisions the user record, seals the refresh token into the
+        session cookie, and redirects to the web app. Every failure
+        redirects to the web app's sign-in page with an error code and no
+        session.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: >-
+            Redirect to WEB_APP_URL/callback?returnTo=… on success, or to
+            WEB_APP_URL/?error=… on failure.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+              description: The sealed session cookie, or a clearing cookie on failure.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      summary: Exchange the session cookie for an access token
+      description: >-
+        Opens the session cookie, obtains a fresh access token from the
+        identity provider, rotates the refresh token, re-seals the cookie,
+        and returns the access token. Requires a same-site Origin. A
+        rejected or missing cookie clears it and answers 401.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: A fresh access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ProviderUnavailable'
+  /auth/logout:
+    post:
+      operationId: endSession
+      summary: End the session
+      description: >-
+        Revokes the identity provider session named in the cookie and
+        clears the cookie. Requires a same-site Origin. Answers 204 even
+        when there was no cookie, so sign-out is idempotent.
+      security:
+        - sessionCookie: []
+        - {}
+      responses:
+        '204':
+          description: Session ended and cookie cleared.
+        '403':
+          $ref: '#/components/responses/ForbiddenOrigin'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /me:
+    get:
+      operationId: getMe
+      summary: Get the authenticated user
+      description: >-
+        Returns the platform user record for the caller identified by the
+        bearer access token. If the record is missing, the server fetches
+        it from the identity provider and provisions it before responding.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The authenticated user's record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /webhooks/workos:
+    post:
+      operationId: receiveWorkOSWebhook
+      summary: Receive a WorkOS event
+      description: >-
+        Inbound endpoint for WorkOS webhooks (user.created, user.updated,
+        user.deleted). Authenticated by the WorkOS-Signature header, never
+        by bearer tokens or cookies. Processing is idempotent and
+        order-safe. Unrecognized event types are acknowledged and ignored.
+        See specs/001-auth-landing-dashboard/contracts/workos-webhook.md.
+      parameters:
+        - name: WorkOS-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: 't=<unix-ms>, v1=<hex HMAC-SHA256 of "t.body">'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkOSEvent'
+      responses:
+        '200':
+          description: Event verified and processed (or acknowledged as ignored).
+        '400':
+          description: Body is not a parseable WorkOS event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: WorkOS AuthKit access token, validated against the WorkOS JWKS.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sow_session
+      description: >-
+        Encrypted HttpOnly session cookie set by /auth/callback. Read only
+        by /auth/refresh and /auth/logout.
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired, or otherwise invalid credential.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ForbiddenOrigin:
+      description: The Origin header is missing or not an allowed web origin.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ProviderUnavailable:
+      description: The identity provider could not be reached.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    AccessToken:
+      type: object
+      required: [access_token, expires_at]
+      properties:
+        access_token:
+          type: string
+          description: Short-lived bearer token for /v1 calls. Hold in memory only.
+        expires_at:
+          type: integer
+          format: int64
+          description: Token expiry, Unix milliseconds.
+    User:
+      type: object
+      required: [id, email, name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Identity-provider user id (opaque text).
+          examples: [user_01K2Z9QH8T5XW4V3J6M0R7ANBQ]
+        email:
+          type: string
+          format: email
+          description: The address the identity provider holds for the user.
+        name:
+          type: string
+          description: Display name. May be empty when the provider has none.
+        created_at:
+          type: integer
+          format: int64
+          description: Creation time, Unix milliseconds.
+        updated_at:
+          type: integer
+          format: int64
+          description: Last provider update time, Unix milliseconds.
+    WorkOSEvent:
+      type: object
+      required: [id, event, data, created_at]
+      description: >-
+        WorkOS event envelope. data carries the provider's user object for
+        user.* events; its shape is owned by WorkOS and validated
+        structurally, not exhaustively.
+      properties:
+        id:
+          type: string
+          description: Event id, used for idempotent processing.
+        event:
+          type: string
+          description: Event type, e.g. user.created.
+        data:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          description: ISO 8601 event creation time (provider-owned format).
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Machine-readable snake_case error code.
+        request_id:
+          type: string
+          description: Correlation id to quote in a support request.
+        details:
+          description: Optional structured detail (validation errors and similar).

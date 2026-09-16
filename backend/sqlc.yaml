@@ -1,0 +1,11 @@
+version: "2"
+sql:
+  - engine: postgresql
+    queries: internal/stores/queries
+    schema: internal/migrations
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/stores/sqlcgen
+        sql_package: pgx/v5
+        emit_interface: true

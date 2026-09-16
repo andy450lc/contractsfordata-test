@@ -1,0 +1,19 @@
+# Live-reload dev mode (make dev). Dev convenience only — never CI/deploy.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/app ./cmd/app"
+bin = "./tmp/app"
+include_ext = ["go", "sql", "yaml", "toml"]
+exclude_dir = ["tmp", "tests", "internal/stores/sqlcgen"]
+exclude_regex = ["_test\\.go$"]
+delay = 200
+kill_delay = "2s"
+send_interrupt = true
+
+[log]
+main_only = false
+
+[misc]
+clean_on_exit = true
